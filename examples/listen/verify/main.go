@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log"
 	"net"
 	"time"
 
@@ -49,6 +50,8 @@ func main() {
 		ConnectContextMaker: func() (context.Context, func()) {
 			return context.WithTimeout(ctx, 30*time.Second)
 		},
+		ConnectionIDGenerator: dtls.RandomCIDGenerator(8),
+		KeyLogWriter:          log.Default().Writer(),
 	}
 
 	// Connect to a DTLS server

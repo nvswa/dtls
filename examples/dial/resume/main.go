@@ -5,14 +5,12 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"time"
 
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/examples/util"
@@ -39,29 +37,29 @@ func main() {
 
 	// Prepare the configuration of the DTLS connection
 	config := &dtls.Config{
-		Certificates:          []tls.Certificate{certificate},
-		ExtendedMasterSecret:  dtls.RequireExtendedMasterSecret,
-		RootCAs:               certPool,
-		ConnectionIDGenerator: dtls.RandomCIDGenerator(8),
-		KeyLogWriter:          log.Default().Writer(),
+		Certificates:         []tls.Certificate{certificate},
+		ExtendedMasterSecret: dtls.RequireExtendedMasterSecret,
+		RootCAs:              certPool,
+		KeyLogWriter:         log.Default().Writer(),
 	}
 
 	// Connect to a DTLS server
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	dtlsConn, err := dtls.DialWithContext(ctx, "udp", addr, config)
+	readData, err := os.ReadFile("resume.bin")
+	state := &dtls.State{}
+	err = state.UnmarshalBinary(readData)
 	util.Check(err)
+
+	pConn, err := net.ListenUDP("udp", nil)
+	util.Check(err)
+
+	dtlsConn, err := dtls.Resume(state, pConn, addr, config)
+
+	util.Check(err)
+	defer func() {
+		util.Check(dtlsConn.Close())
+	}()
 
 	fmt.Println("Connected; type 'exit' to shutdown gracefully")
 
 	util.Chat(dtlsConn)
-
-	state := dtlsConn.ConnectionState()
-
-	stateBytes, err := state.MarshalBinary()
-	util.Check(err)
-
-	err = os.WriteFile("resume.bin", stateBytes, 0644)
-	util.Check(err)
-
 }
