@@ -61,7 +61,7 @@ func main() {
 			pconn, addr, err := listener.Accept()
 			util.Check(err)
 
-			conn, err := dtls.ResumeWithContext(ctx, state, pconn, addr, config)
+			conn, err := dtls.Resume(state, pconn, addr, config)
 			util.Check(err)
 
 			// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`
