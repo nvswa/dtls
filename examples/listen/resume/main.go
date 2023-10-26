@@ -6,8 +6,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"log"
 	"net"
@@ -26,27 +24,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	//
-	// Everything below is the pion-DTLS API! Thanks for using it ❤️.
-	//
-
-	certificate, err := util.LoadKeyAndCertificate("examples/certificates/server.pem",
-		"examples/certificates/server.pub.pem")
-	util.Check(err)
-
-	rootCertificate, err := util.LoadCertificate("examples/certificates/server.pub.pem")
-	util.Check(err)
-	certPool := x509.NewCertPool()
-	cert, err := x509.ParseCertificate(rootCertificate.Certificate[0])
-	util.Check(err)
-	certPool.AddCert(cert)
-
 	// Prepare the configuration of the DTLS connection
 	config := &dtls.Config{
-		Certificates:         []tls.Certificate{certificate},
 		ExtendedMasterSecret: dtls.RequireExtendedMasterSecret,
 		ClientAuth:           dtls.RequireAndVerifyClientCert,
-		ClientCAs:            certPool,
 		// Create timeout context for accepted connection.
 		ConnectContextMaker: func() (context.Context, func()) {
 			return context.WithTimeout(ctx, 30*time.Second)
@@ -56,39 +37,42 @@ func main() {
 	}
 
 	// Connect to a DTLS server
-	listener, err := dtls.Listen("udp", addr, config)
+	listener, err := dtls.NewResumeListener("udp", addr, config)
 	util.Check(err)
 	defer func() {
 		util.Check(listener.Close())
 	}()
+
+	readData, err := os.ReadFile("resume_server.bin")
+	util.Check(err)
+
+	state := &dtls.State{}
+	err = state.UnmarshalBinary(readData)
+	util.Check(err)
 
 	fmt.Println("Listening")
 
 	// Simulate a chat session
 	hub := util.NewHub()
 
-	// Wait for a connection.
-	conn, err := listener.Accept()
-	util.Check(err)
-	// defer conn.Close() // TODO: graceful shutdown
+	go func() {
+		for {
+			// Wait for a connection.
+			pconn, addr, err := listener.Accept()
+			util.Check(err)
 
-	// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`
-	// using `dtlsConn := conn.(*dtls.Conn)` in order to to expose
-	// functions like `ConnectionState` etc.
+			conn, err := dtls.ResumeWithContext(ctx, state, pconn, addr, config)
+			util.Check(err)
 
-	// Register the connection with the chat hub
-	hub.Register(conn)
+			// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`
+			// using `dtlsConn := conn.(*dtls.Conn)` in order to to expose
+			// functions like `ConnectionState` etc.
+
+			// Register the connection with the chat hub
+			hub.Register(conn)
+		}
+	}()
 
 	// Start chatting
 	hub.Chat()
-
-	dtlsConn := conn.(*dtls.Conn)
-
-	state := dtlsConn.ConnectionState()
-
-	stateBytes, err := state.MarshalBinary()
-	util.Check(err)
-
-	err = os.WriteFile("resume_server.bin", stateBytes, 0644)
-	util.Check(err)
 }
