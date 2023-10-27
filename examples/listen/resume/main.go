@@ -1,7 +1,5 @@
 // SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
-
-// Package main implements an example DTLS server which verifies client certificates.
 package main
 
 import (
@@ -20,6 +18,7 @@ import (
 func main() {
 	var resumeFile = flag.String("file", "", "resume file")
 	var secret = flag.String("secret", "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "shared secret")
+	flag.Parse()
 
 	// Prepare the IP to connect to
 	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 4444}
@@ -50,7 +49,6 @@ func main() {
 	state := &dtls.State{}
 
 	if *resumeFile != "" {
-		fmt.Println("from file")
 		readData, err := os.ReadFile(*resumeFile)
 		util.Check(err)
 

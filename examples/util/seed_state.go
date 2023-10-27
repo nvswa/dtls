@@ -1,7 +1,5 @@
 package util
 
-//Adapted from https://github.com/gaukas/seed2sdp/blob/master/dtlsCertificate.go
-
 import (
 	"bytes"
 	"crypto/sha256"

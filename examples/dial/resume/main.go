@@ -1,7 +1,5 @@
 // SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
-
-// Package main implements a DTLS client using a client certificate.
 package main
 
 import (
@@ -19,6 +17,7 @@ func main() {
 	var remoteAddr = flag.String("raddr", "127.0.0.1:4444", "remote address")
 	var resumeFile = flag.String("file", "", "resume file")
 	var secret = flag.String("secret", "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "shared secret")
+	flag.Parse()
 
 	// Prepare the IP to connect to
 	raddr, err := net.ResolveUDPAddr("udp", *remoteAddr)
@@ -33,7 +32,6 @@ func main() {
 	state := &dtls.State{}
 
 	if *resumeFile != "" {
-		fmt.Println("from file")
 		readData, err := os.ReadFile(*resumeFile)
 		util.Check(err)
 
