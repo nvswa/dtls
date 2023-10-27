@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +18,9 @@ import (
 )
 
 func main() {
+	var resumeFile = flag.String("file", "", "resume file")
+	var secret = flag.String("secret", "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "shared secret")
+
 	// Prepare the IP to connect to
 	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 4444}
 
@@ -43,12 +47,20 @@ func main() {
 		util.Check(listener.Close())
 	}()
 
-	readData, err := os.ReadFile("resume_server.bin")
-	util.Check(err)
-
 	state := &dtls.State{}
-	err = state.UnmarshalBinary(readData)
-	util.Check(err)
+
+	if *resumeFile != "" {
+		fmt.Println("from file")
+		readData, err := os.ReadFile(*resumeFile)
+		util.Check(err)
+
+		err = state.UnmarshalBinary(readData)
+		util.Check(err)
+	} else {
+		sharedSecret := []byte(*secret)
+		state, err = util.DTLSServerState(sharedSecret)
+		util.Check(err)
+	}
 
 	fmt.Println("Listening")
 
