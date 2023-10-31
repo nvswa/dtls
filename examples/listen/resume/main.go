@@ -4,15 +4,24 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/examples/util"
+	"github.com/pion/dtls/v2/pkg/protocol"
+	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
+)
+
+const (
+	receiveMTU = 8192
+	cidSize    = 8
 )
 
 func main() {
@@ -35,7 +44,7 @@ func main() {
 		ConnectContextMaker: func() (context.Context, func()) {
 			return context.WithTimeout(ctx, 30*time.Second)
 		},
-		ConnectionIDGenerator: dtls.RandomCIDGenerator(8),
+		ConnectionIDGenerator: dtls.RandomCIDGenerator(cidSize),
 		KeyLogWriter:          log.Default().Writer(),
 	}
 
@@ -71,7 +80,58 @@ func main() {
 			pconn, addr, err := listener.Accept()
 			util.Check(err)
 
-			conn, err := dtls.Resume(state, pconn, addr, config)
+			packet := make([]byte, receiveMTU)
+			n, readAddr, err := pconn.ReadFrom(packet)
+			util.Check(err)
+
+			pkts, err := recordlayer.ContentAwareUnpackDatagram(packet[:n], cidSize)
+			util.Check(err)
+
+			h := &recordlayer.Header{
+				ConnectionID: make([]byte, cidSize),
+			}
+			for i, pkt := range pkts {
+				if err := h.Unmarshal(pkt); err != nil {
+					continue
+				}
+
+				if h.ContentType != protocol.ContentTypeConnectionID {
+					continue
+				}
+
+				start := recordlayer.FixedHeaderSize + cidSize
+				appData := pkt[start:]
+				fmt.Printf("%+v\n", h)
+
+				newData, err := hex.DecodeString("0d52a86717999798f89aa0b28cf0b684f5aed6069bc76003e3d2ec2e3dbcaa093729d3db5b")
+				util.Check(err)
+
+				h.ContentLen = uint16(len(newData))
+
+				newHeader, err := h.Marshal()
+				util.Check(err)
+
+				combined := make([]byte, 0, len(newHeader)+len(newData))
+				combined = append(combined, newHeader...)
+				combined = append(combined, newData...)
+
+				pkts[i] = combined
+
+				fmt.Printf("%v\n", hex.EncodeToString(appData))
+			}
+
+			var flatData []byte
+			for _, d := range pkts {
+				flatData = append(flatData, d...)
+			}
+
+			epconn := &edit1pconn{
+				PacketConn: pconn,
+				onceBytes:  flatData,
+				remote:     readAddr,
+			}
+
+			conn, err := dtls.Resume(state, epconn, addr, config)
 			util.Check(err)
 
 			// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`
@@ -85,4 +145,23 @@ func main() {
 
 	// Start chatting
 	hub.Chat()
+}
+
+type edit1pconn struct {
+	net.PacketConn
+	onceBytes []byte
+	remote    net.Addr
+	doOnce    sync.Once
+}
+
+func (c *edit1pconn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	var copied int
+	c.doOnce.Do(func() {
+		copied = copy(p, c.onceBytes)
+	})
+	if copied > 0 {
+		return copied, c.remote, nil
+	}
+
+	return c.PacketConn.ReadFrom(p)
 }
