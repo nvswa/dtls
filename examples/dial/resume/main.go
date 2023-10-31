@@ -16,19 +16,15 @@ import (
 	"github.com/pion/dtls/v2/pkg/protocol"
 	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
 	"github.com/refraction-networking/conjure/pkg/core"
-	"github.com/refraction-networking/ed25519/extra25519"
-	"golang.org/x/crypto/curve25519"
 )
 
 const cidSize = 8
-
-const station_privkey = "203963feed62ddda89b98857940f09866ae840f42e8c90160e411a0029b87e60"
 
 func main() {
 	var remoteAddr = flag.String("raddr", "127.0.0.1:4444", "remote address")
 	var resumeFile = flag.String("file", "", "resume file")
 	// var prepend = flag.String("prepend", "", "to prepend")
-	var secret = flag.String("secret", "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "shared secret")
+	var secret = flag.String("secret", "", "shared secret")
 	var pubkey = flag.String("pubkey", "0b63baad7f2f4bb5b547c53adc0fbb179852910607935e6f4b5639fd989b1156", "pubkey")
 	flag.Parse()
 
@@ -40,20 +36,6 @@ func main() {
 	config := &dtls.Config{
 		ExtendedMasterSecret: dtls.RequireExtendedMasterSecret,
 		KeyLogWriter:         log.Default().Writer(),
-	}
-
-	state := &dtls.State{}
-
-	if *resumeFile != "" {
-		readData, err := os.ReadFile(*resumeFile)
-		util.Check(err)
-
-		err = state.UnmarshalBinary(readData)
-		util.Check(err)
-	} else {
-		sharedSecret := []byte(*secret)
-		state, err = util.DTLSClientState(sharedSecret)
-		util.Check(err)
 	}
 
 	pConn, err := net.ListenUDP("udp", nil)
@@ -71,26 +53,29 @@ func main() {
 	keys, err := core.GenerateClientSharedKeys(pubkey32Bytes)
 	util.Check(err)
 
-	representative := &[32]byte{}
-	copy(representative[:], keys.Representative)
-
-	representative[31] &= 0x3F
-
-	res := &[32]byte{}
-	extra25519.RepresentativeToPublicKey(res, representative)
-
-	priv, err := hex.DecodeString(station_privkey)
-	util.Check(err)
-
-	s, err := curve25519.X25519(priv, res[:])
-	util.Check(err)
-
-	fmt.Printf("shared secret: %v\n", hex.EncodeToString(keys.SharedSecret))
-	fmt.Printf("res          : %v\n", hex.EncodeToString(s))
+	fmt.Printf("representative: %v\n", hex.EncodeToString(keys.Representative))
+	fmt.Printf("shared secret : %v\n", hex.EncodeToString(keys.SharedSecret))
 
 	wpconn := &write1pconn{
 		PacketConn: pConn,
 		onceBytes:  keys.Representative,
+	}
+
+	state := &dtls.State{}
+
+	if *resumeFile != "" {
+		readData, err := os.ReadFile(*resumeFile)
+		util.Check(err)
+
+		err = state.UnmarshalBinary(readData)
+		util.Check(err)
+	} else if *secret != "" {
+		sharedSecret := []byte(*secret)
+		state, err = util.DTLSClientState(sharedSecret)
+		util.Check(err)
+	} else {
+		state, err = util.DTLSClientState(keys.SharedSecret)
+		util.Check(err)
 	}
 
 	dtlsConn, err := dtls.Resume(state, wpconn, raddr, config)

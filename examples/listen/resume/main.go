@@ -17,16 +17,20 @@ import (
 	"github.com/pion/dtls/v2/examples/util"
 	"github.com/pion/dtls/v2/pkg/protocol"
 	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
+	"github.com/refraction-networking/ed25519/extra25519"
+	"golang.org/x/crypto/curve25519"
 )
 
 const (
-	receiveMTU = 8192
-	cidSize    = 8
+	receiveMTU      = 8192
+	cidSize         = 8
+	keySize         = 32
+	station_privkey = "203963feed62ddda89b98857940f09866ae840f42e8c90160e411a0029b87e60"
 )
 
 func main() {
 	var resumeFile = flag.String("file", "", "resume file")
-	var secret = flag.String("secret", "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "shared secret")
+	var secret = flag.String("secret", "", "shared secret")
 	flag.Parse()
 
 	// Prepare the IP to connect to
@@ -55,20 +59,6 @@ func main() {
 		util.Check(listener.Close())
 	}()
 
-	state := &dtls.State{}
-
-	if *resumeFile != "" {
-		readData, err := os.ReadFile(*resumeFile)
-		util.Check(err)
-
-		err = state.UnmarshalBinary(readData)
-		util.Check(err)
-	} else {
-		sharedSecret := []byte(*secret)
-		state, err = util.DTLSServerState(sharedSecret)
-		util.Check(err)
-	}
-
 	fmt.Println("Listening")
 
 	// Simulate a chat session
@@ -90,35 +80,49 @@ func main() {
 			h := &recordlayer.Header{
 				ConnectionID: make([]byte, cidSize),
 			}
-			for i, pkt := range pkts {
-				if err := h.Unmarshal(pkt); err != nil {
-					continue
-				}
 
-				if h.ContentType != protocol.ContentTypeConnectionID {
-					continue
-				}
-
-				start := recordlayer.FixedHeaderSize + cidSize
-				appData := pkt[start:]
-				fmt.Printf("%+v\n", h)
-
-				newData, err := hex.DecodeString("0d52a86717999798f89aa0b28cf0b684f5aed6069bc76003e3d2ec2e3dbcaa093729d3db5b")
-				util.Check(err)
-
-				h.ContentLen = uint16(len(newData))
-
-				newHeader, err := h.Marshal()
-				util.Check(err)
-
-				combined := make([]byte, 0, len(newHeader)+len(newData))
-				combined = append(combined, newHeader...)
-				combined = append(combined, newData...)
-
-				pkts[i] = combined
-
-				fmt.Printf("%v\n", hex.EncodeToString(appData))
+			pkt := pkts[0]
+			if err := h.Unmarshal(pkt); err != nil {
+				continue
 			}
+
+			if h.ContentType != protocol.ContentTypeConnectionID {
+				continue
+			}
+
+			start := recordlayer.FixedHeaderSize + cidSize
+			representative := &[32]byte{}
+			n = copy(representative[:], pkt[start:start+keySize])
+			if n != len(representative) {
+				panic("worng copy size")
+			}
+
+			representative[31] &= 0x3F
+
+			pubkey := &[32]byte{}
+			extra25519.RepresentativeToPublicKey(pubkey, representative)
+
+			priv, err := hex.DecodeString(station_privkey)
+			util.Check(err)
+
+			newSharedSecret, err := curve25519.X25519(priv, pubkey[:])
+			util.Check(err)
+
+			fmt.Printf("representative: %v\n", hex.EncodeToString(representative[:]))
+			fmt.Printf("shared secret : %v\n", hex.EncodeToString(newSharedSecret))
+
+			newData := pkt[start+keySize:]
+
+			h.ContentLen = uint16(len(newData))
+
+			newHeader, err := h.Marshal()
+			util.Check(err)
+
+			combined := make([]byte, 0, len(newHeader)+len(newData))
+			combined = append(combined, newHeader...)
+			combined = append(combined, newData...)
+
+			pkts[0] = combined
 
 			var flatData []byte
 			for _, d := range pkts {
@@ -129,6 +133,23 @@ func main() {
 				PacketConn: pconn,
 				onceBytes:  flatData,
 				remote:     readAddr,
+			}
+
+			state := &dtls.State{}
+
+			if *resumeFile != "" {
+				readData, err := os.ReadFile(*resumeFile)
+				util.Check(err)
+
+				err = state.UnmarshalBinary(readData)
+				util.Check(err)
+			} else if *secret != "" {
+				sharedSecret := []byte(*secret)
+				state, err = util.DTLSServerState(sharedSecret)
+				util.Check(err)
+			} else {
+				state, err = util.DTLSServerState(newSharedSecret)
+				util.Check(err)
 			}
 
 			conn, err := dtls.Resume(state, epconn, addr, config)
