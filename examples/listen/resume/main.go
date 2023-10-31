@@ -67,73 +67,9 @@ func main() {
 	go func() {
 		for {
 			// Wait for a connection.
+			var pconn net.PacketConn
 			pconn, addr, err := listener.Accept()
 			util.Check(err)
-
-			packet := make([]byte, receiveMTU)
-			n, readAddr, err := pconn.ReadFrom(packet)
-			util.Check(err)
-
-			pkts, err := recordlayer.ContentAwareUnpackDatagram(packet[:n], cidSize)
-			util.Check(err)
-
-			h := &recordlayer.Header{
-				ConnectionID: make([]byte, cidSize),
-			}
-
-			pkt := pkts[0]
-			if err := h.Unmarshal(pkt); err != nil {
-				continue
-			}
-
-			if h.ContentType != protocol.ContentTypeConnectionID {
-				continue
-			}
-
-			start := recordlayer.FixedHeaderSize + cidSize
-			representative := &[32]byte{}
-			n = copy(representative[:], pkt[start:start+keySize])
-			if n != len(representative) {
-				panic("worng copy size")
-			}
-
-			representative[31] &= 0x3F
-
-			pubkey := &[32]byte{}
-			extra25519.RepresentativeToPublicKey(pubkey, representative)
-
-			priv, err := hex.DecodeString(station_privkey)
-			util.Check(err)
-
-			newSharedSecret, err := curve25519.X25519(priv, pubkey[:])
-			util.Check(err)
-
-			fmt.Printf("representative: %v\n", hex.EncodeToString(representative[:]))
-			fmt.Printf("shared secret : %v\n", hex.EncodeToString(newSharedSecret))
-
-			newData := pkt[start+keySize:]
-
-			h.ContentLen = uint16(len(newData))
-
-			newHeader, err := h.Marshal()
-			util.Check(err)
-
-			combined := make([]byte, 0, len(newHeader)+len(newData))
-			combined = append(combined, newHeader...)
-			combined = append(combined, newData...)
-
-			pkts[0] = combined
-
-			var flatData []byte
-			for _, d := range pkts {
-				flatData = append(flatData, d...)
-			}
-
-			epconn := &edit1pconn{
-				PacketConn: pconn,
-				onceBytes:  flatData,
-				remote:     readAddr,
-			}
 
 			state := &dtls.State{}
 
@@ -148,11 +84,75 @@ func main() {
 				state, err = util.DTLSServerState(sharedSecret)
 				util.Check(err)
 			} else {
+				packet := make([]byte, receiveMTU)
+				n, readAddr, err := pconn.ReadFrom(packet)
+				util.Check(err)
+
+				pkts, err := recordlayer.ContentAwareUnpackDatagram(packet[:n], cidSize)
+				util.Check(err)
+
+				h := &recordlayer.Header{
+					ConnectionID: make([]byte, cidSize),
+				}
+
+				pkt := pkts[0]
+				if err := h.Unmarshal(pkt); err != nil {
+					continue
+				}
+
+				if h.ContentType != protocol.ContentTypeConnectionID {
+					continue
+				}
+
+				start := recordlayer.FixedHeaderSize + cidSize
+				representative := &[32]byte{}
+				n = copy(representative[:], pkt[start:start+keySize])
+				if n != len(representative) {
+					panic("worng copy size")
+				}
+
+				representative[31] &= 0x3F
+
+				pubkey := &[32]byte{}
+				extra25519.RepresentativeToPublicKey(pubkey, representative)
+
+				priv, err := hex.DecodeString(station_privkey)
+				util.Check(err)
+
+				newSharedSecret, err := curve25519.X25519(priv, pubkey[:])
+				util.Check(err)
+
+				fmt.Printf("representative: %v\n", hex.EncodeToString(representative[:]))
+				fmt.Printf("shared secret : %v\n", hex.EncodeToString(newSharedSecret))
+
+				newData := pkt[start+keySize:]
+
+				h.ContentLen = uint16(len(newData))
+
+				newHeader, err := h.Marshal()
+				util.Check(err)
+
+				combined := make([]byte, 0, len(newHeader)+len(newData))
+				combined = append(combined, newHeader...)
+				combined = append(combined, newData...)
+
+				pkts[0] = combined
+
+				var flatData []byte
+				for _, d := range pkts {
+					flatData = append(flatData, d...)
+				}
+
+				pconn = &edit1pconn{
+					PacketConn: pconn,
+					onceBytes:  flatData,
+					remote:     readAddr,
+				}
 				state, err = util.DTLSServerState(newSharedSecret)
 				util.Check(err)
 			}
 
-			conn, err := dtls.Resume(state, epconn, addr, config)
+			conn, err := dtls.Resume(state, pconn, addr, config)
 			util.Check(err)
 
 			// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`

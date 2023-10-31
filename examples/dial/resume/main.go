@@ -23,7 +23,6 @@ const cidSize = 8
 func main() {
 	var remoteAddr = flag.String("raddr", "127.0.0.1:4444", "remote address")
 	var resumeFile = flag.String("file", "", "resume file")
-	// var prepend = flag.String("prepend", "", "to prepend")
 	var secret = flag.String("secret", "", "shared secret")
 	var pubkey = flag.String("pubkey", "0b63baad7f2f4bb5b547c53adc0fbb179852910607935e6f4b5639fd989b1156", "pubkey")
 	flag.Parse()
@@ -38,28 +37,10 @@ func main() {
 		KeyLogWriter:         log.Default().Writer(),
 	}
 
-	pConn, err := net.ListenUDP("udp", nil)
+	var pConn net.PacketConn
+
+	pConn, err = net.ListenUDP("udp", nil)
 	util.Check(err)
-
-	pubkeyBytes, err := hex.DecodeString(*pubkey)
-	util.Check(err)
-	if len(pubkeyBytes) != 32 {
-		panic("pubkey incorrect lenth")
-	}
-
-	pubkey32Bytes := [32]byte{}
-	copy(pubkey32Bytes[:], pubkeyBytes)
-
-	keys, err := core.GenerateClientSharedKeys(pubkey32Bytes)
-	util.Check(err)
-
-	fmt.Printf("representative: %v\n", hex.EncodeToString(keys.Representative))
-	fmt.Printf("shared secret : %v\n", hex.EncodeToString(keys.SharedSecret))
-
-	wpconn := &write1pconn{
-		PacketConn: pConn,
-		onceBytes:  keys.Representative,
-	}
 
 	state := &dtls.State{}
 
@@ -74,11 +55,32 @@ func main() {
 		state, err = util.DTLSClientState(sharedSecret)
 		util.Check(err)
 	} else {
+
+		pubkeyBytes, err := hex.DecodeString(*pubkey)
+		util.Check(err)
+		if len(pubkeyBytes) != 32 {
+			panic("pubkey incorrect lenth")
+		}
+
+		pubkey32Bytes := [32]byte{}
+		copy(pubkey32Bytes[:], pubkeyBytes)
+
+		keys, err := core.GenerateClientSharedKeys(pubkey32Bytes)
+		util.Check(err)
+
+		fmt.Printf("representative: %v\n", hex.EncodeToString(keys.Representative))
+		fmt.Printf("shared secret : %v\n", hex.EncodeToString(keys.SharedSecret))
+
+		pConn = &write1pconn{
+			PacketConn: pConn,
+			onceBytes:  keys.Representative,
+		}
+
 		state, err = util.DTLSClientState(keys.SharedSecret)
 		util.Check(err)
 	}
 
-	dtlsConn, err := dtls.Resume(state, wpconn, raddr, config)
+	dtlsConn, err := dtls.Resume(state, pConn, raddr, config)
 
 	util.Check(err)
 	defer func() {
