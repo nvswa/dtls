@@ -106,6 +106,10 @@ func main() {
 
 				start := recordlayer.FixedHeaderSize + cidSize
 				representative := &[32]byte{}
+				if len(pkt) < (start + keySize) {
+					fmt.Printf("packet too small to contain a key\n")
+					continue
+				}
 				n = copy(representative[:], pkt[start:start+keySize])
 				if n != len(representative) {
 					panic("worng copy size")
