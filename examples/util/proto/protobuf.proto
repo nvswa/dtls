@@ -1,0 +1,9 @@
+syntax = "proto2";
+
+package proto;
+
+message ConnInfo {
+    optional bytes id = 1;
+    optional string covert = 2;
+    optional bytes early_data = 3;
+}

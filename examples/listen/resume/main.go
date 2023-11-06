@@ -15,10 +15,12 @@ import (
 
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/examples/util"
+	pb "github.com/pion/dtls/v2/examples/util/proto"
 	"github.com/pion/dtls/v2/pkg/protocol"
 	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
 	"github.com/refraction-networking/ed25519/extra25519"
 	"golang.org/x/crypto/curve25519"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -159,12 +161,33 @@ func main() {
 			conn, err := dtls.Resume(state, pconn, addr, config)
 			util.Check(err)
 
+			first := make([]byte, receiveMTU)
+			n, err := conn.Read(first)
+			if err != nil {
+				fmt.Printf("err: %v", err)
+				continue
+			}
+
+			info := &pb.ConnInfo{}
+			if err := proto.Unmarshal(first[:n], info); err != nil {
+				fmt.Printf("err: %v", err)
+				continue
+			}
+
+			fmt.Printf("Covert: %v\n", info.GetCovert())
+			fmt.Printf("ID: %v\n", hex.EncodeToString(info.GetId()))
+
+			econn := &edit1conn{
+				Conn:      conn,
+				onceBytes: info.GetEarlyData(),
+			}
+
 			// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`
 			// using `dtlsConn := conn.(*dtls.Conn)` in order to to expose
 			// functions like `ConnectionState` etc.
 
 			// Register the connection with the chat hub
-			hub.Register(conn)
+			hub.Register(econn)
 		}
 	}()
 
@@ -179,7 +202,7 @@ type edit1pconn struct {
 	doOnce    sync.Once
 }
 
-func (c *edit1pconn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+func (c *edit1pconn) ReadFrom(p []byte) (int, net.Addr, error) {
 	var copied int
 	c.doOnce.Do(func() {
 		copied = copy(p, c.onceBytes)
@@ -189,4 +212,22 @@ func (c *edit1pconn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	}
 
 	return c.PacketConn.ReadFrom(p)
+}
+
+type edit1conn struct {
+	net.Conn
+	onceBytes []byte
+	doOnce    sync.Once
+}
+
+func (c *edit1conn) Read(p []byte) (n int, err error) {
+	var copied int
+	c.doOnce.Do(func() {
+		copied = copy(p, c.onceBytes)
+	})
+	if copied > 0 {
+		return copied, nil
+	}
+
+	return c.Conn.Read(p)
 }

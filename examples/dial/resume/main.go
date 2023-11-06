@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -13,9 +14,11 @@ import (
 
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/examples/util"
+	pb "github.com/pion/dtls/v2/examples/util/proto"
 	"github.com/pion/dtls/v2/pkg/protocol"
 	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
 	"github.com/refraction-networking/conjure/pkg/core"
+	"google.golang.org/protobuf/proto"
 )
 
 const cidSize = 8
@@ -24,6 +27,7 @@ func main() {
 	var remoteAddr = flag.String("raddr", "127.0.0.1:4444", "remote address")
 	var resumeFile = flag.String("file", "", "resume file")
 	var secret = flag.String("secret", "", "shared secret")
+	var covert = flag.String("covert", "example.com:22", "covert addr")
 	var pubkey = flag.String("pubkey", "0b63baad7f2f4bb5b547c53adc0fbb179852910607935e6f4b5639fd989b1156", "pubkey")
 	flag.Parse()
 
@@ -82,14 +86,19 @@ func main() {
 
 	dtlsConn, err := dtls.Resume(state, pConn, raddr, config)
 
+	conn := &write1conn{
+		Conn:   dtlsConn,
+		covert: *covert,
+	}
+
 	util.Check(err)
 	defer func() {
-		util.Check(dtlsConn.Close())
+		util.Check(conn.Close())
 	}()
 
 	fmt.Println("Connected; type 'exit' to shutdown gracefully")
 
-	util.Chat(dtlsConn)
+	util.Chat(conn)
 }
 
 type write1pconn struct {
@@ -163,4 +172,44 @@ func (c *write1pconn) editBuf(p []byte) ([]byte, error) {
 
 	return flatData, nil
 
+}
+
+type write1conn struct {
+	net.Conn
+	doOnce sync.Once
+	covert string
+}
+
+func (c *write1conn) Write(p []byte) (int, error) {
+	var n int
+	var err error
+
+	c.doOnce.Do(func() {
+		id := make([]byte, 16)
+		if _, err = rand.Read(id); err != nil {
+			return
+		}
+
+		toSend := &pb.ConnInfo{
+			Id:        id,
+			EarlyData: p,
+			Covert:    &c.covert,
+		}
+
+		var send []byte
+		send, err = proto.Marshal(toSend)
+		if err != nil {
+			return
+		}
+
+		n, err = c.Conn.Write(send)
+	})
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		return len(p), nil
+	}
+
+	return c.Conn.Write(p)
 }
