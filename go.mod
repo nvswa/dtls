@@ -2,6 +2,7 @@ module github.com/pion/dtls/v2
 
 require (
 	github.com/pion/logging v0.2.2
+	github.com/pion/sctp v1.8.9 // indirect
 	github.com/pion/transport/v3 v3.0.1
 	github.com/refraction-networking/conjure v0.7.8
 	github.com/refraction-networking/ed25519 v0.1.2
