@@ -16,9 +16,11 @@ import (
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/examples/util"
 	pb "github.com/pion/dtls/v2/examples/util/proto"
+	dtlsnet "github.com/pion/dtls/v2/pkg/net"
 	"github.com/pion/dtls/v2/pkg/protocol"
 	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
 	"github.com/refraction-networking/ed25519/extra25519"
+	"github.com/xtaci/kcp-go"
 	"golang.org/x/crypto/curve25519"
 	"google.golang.org/protobuf/proto"
 )
@@ -182,12 +184,18 @@ func main() {
 				onceBytes: info.GetEarlyData(),
 			}
 
+			kcpListener, err := kcp.ServeConn(nil, 0, 0, dtlsnet.PacketConnFromConn(econn))
+			util.Check(err)
+
+			kcpConn, err := kcpListener.Accept()
+			util.Check(err)
+
 			// `conn` is of type `net.Conn` but may be casted to `dtls.Conn`
 			// using `dtlsConn := conn.(*dtls.Conn)` in order to to expose
 			// functions like `ConnectionState` etc.
 
 			// Register the connection with the chat hub
-			hub.Register(econn)
+			hub.Register(kcpConn)
 		}
 	}()
 

@@ -15,9 +15,11 @@ import (
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/examples/util"
 	pb "github.com/pion/dtls/v2/examples/util/proto"
+	dtlsnet "github.com/pion/dtls/v2/pkg/net"
 	"github.com/pion/dtls/v2/pkg/protocol"
 	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
 	"github.com/refraction-networking/conjure/pkg/core"
+	"github.com/xtaci/kcp-go"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -91,14 +93,16 @@ func main() {
 		covert: *covert,
 	}
 
+	kcpConn, err := kcp.NewConn("", nil, 0, 0, dtlsnet.PacketConnFromConn(conn))
 	util.Check(err)
+
 	defer func() {
 		util.Check(conn.Close())
 	}()
 
 	fmt.Println("Connected; type 'exit' to shutdown gracefully")
 
-	util.Chat(conn)
+	util.Chat(kcpConn)
 }
 
 type write1pconn struct {
