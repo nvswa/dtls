@@ -87,6 +87,7 @@ func main() {
 	}
 
 	dtlsConn, err := dtls.Resume(state, pConn, raddr, config)
+	util.Check(err)
 
 	conn := &write1conn{
 		Conn:   dtlsConn,
