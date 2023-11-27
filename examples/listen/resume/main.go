@@ -35,10 +35,13 @@ const (
 func main() {
 	var resumeFile = flag.String("file", "", "resume file")
 	var secret = flag.String("secret", "", "shared secret")
+	var listenAddr = flag.String("laddr", "0.0.0.0:4444", "listen address")
+
 	flag.Parse()
 
 	// Prepare the IP to connect to
-	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 4444}
+	addr, err := net.ResolveUDPAddr("udp", *listenAddr)
+	util.Check(err)
 
 	// Create parent context to cleanup handshaking connections on exit.
 	ctx, cancel := context.WithCancel(context.Background())
